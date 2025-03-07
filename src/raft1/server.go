@@ -27,7 +27,7 @@ type rfsrv struct {
 
 	mu   sync.Mutex
 	raft raftapi.Raft
-	logs map[int]any // copy of each server's committed entries
+	logs map[int]any // copy of each server's committed Entries
 }
 
 func newRfsrv(ts *Test, srv int, ends []*labrpc.ClientEnd, persister *tester.Persister, snapshot bool) *rfsrv {

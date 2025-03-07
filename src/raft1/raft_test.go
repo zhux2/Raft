@@ -494,7 +494,7 @@ func TestRejoin3B(t *testing.T) {
 	ts.g.DisconnectAll(leader1)
 	tester.AnnotateConnection(ts.g.GetConnected())
 
-	// make old leader try to agree on some entries
+	// make old leader try to agree on some Entries
 	start := tester.GetAnnotateTimestamp()
 	ts.srvs[leader1].Raft().Start(102)
 	ts.srvs[leader1].Raft().Start(103)
@@ -718,13 +718,13 @@ loop:
 		}
 
 		if total2-total1 > (iters+1+3)*3 {
-			details := fmt.Sprintf("number of RPC used for %v entries = %v > %v",
+			details := fmt.Sprintf("number of RPC used for %v Entries = %v > %v",
 				iters, total2-total1, (iters+1+3)*3)
 			tester.AnnotateCheckerFailure("used too many RPCs for agreement", details)
-			t.Fatalf("too many RPCs (%v) for %v entries\n", total2-total1, iters)
+			t.Fatalf("too many RPCs (%v) for %v Entries\n", total2-total1, iters)
 		}
 
-		details := fmt.Sprintf("number of RPC used for %v entries = %v <= %v",
+		details := fmt.Sprintf("number of RPC used for %v Entries = %v <= %v",
 			iters, total2-total1, (iters+1+3)*3)
 		tester.AnnotateCheckerSuccess("used reasonable number of RPCs for agreement", details)
 
@@ -897,7 +897,7 @@ func TestPersist33C(t *testing.T) {
 // probability (perhaps without committing the Command), or crash after a while
 // with low probability (most likey committing the Command).  If the number of
 // alive servers isn't enough to form a majority, perhaps start a new server.
-// The leader in a new term may try to finish replicating log entries that
+// The leader in a new term may try to finish replicating log Entries that
 // haven't been committed yet.
 func TestFigure83C(t *testing.T) {
 	servers := 5

@@ -7,7 +7,9 @@ package raft
 // Make() creates a new raft peer that implements the raft interface.
 
 import (
+	"bytes"
 	"fmt"
+	"raft/labgob"
 	"raft/labrpc"
 	"raft/raftapi"
 	"raft/tester1"
@@ -93,14 +95,16 @@ func (rf *Raft) GetState() (int, bool) {
 // after you've implemented snapshots, pass the current snapshot
 // (or nil if there's not yet a snapshot).
 func (rf *Raft) persist() {
-	// Your code here (3C).
-	// Example:
-	// w := new(bytes.Buffer)
-	// e := labgob.NewEncoder(w)
-	// e.Encode(rf.xxx)
-	// e.Encode(rf.yyy)
-	// raftstate := w.Bytes()
-	// rf.persister.Save(raftstate, nil)
+	buffer := new(bytes.Buffer)
+	encoder := labgob.NewEncoder(buffer)
+	if encoder.Encode(rf.currentTerm) != nil ||
+		encoder.Encode(rf.votedFor) != nil ||
+		encoder.Encode(rf.log) != nil {
+		println("persist err")
+		return
+	}
+	raftstate := buffer.Bytes()
+	rf.persister.Save(raftstate, nil)
 }
 
 // restore previously persisted state.
@@ -108,19 +112,21 @@ func (rf *Raft) readPersist(data []byte) {
 	if data == nil || len(data) < 1 { // bootstrap without any state?
 		return
 	}
-	// Your code here (3C).
-	// Example:
-	// r := bytes.NewBuffer(data)
-	// d := labgob.NewDecoder(r)
-	// var xxx
-	// var yyy
-	// if d.Decode(&xxx) != nil ||
-	//    d.Decode(&yyy) != nil {
-	//   error...
-	// } else {
-	//   rf.xxx = xxx
-	//   rf.yyy = yyy
-	// }
+
+	buffer := bytes.NewBuffer(data)
+	decoder := labgob.NewDecoder(buffer)
+
+	var pCurrentTerm, pVoteFor int
+	var pLog Log
+	if decoder.Decode(&pCurrentTerm) != nil ||
+		decoder.Decode(&pVoteFor) != nil ||
+		decoder.Decode(&pLog) != nil {
+		return
+	} else {
+		rf.currentTerm = pCurrentTerm
+		rf.votedFor = pVoteFor
+		rf.log = pLog
+	}
 }
 
 // PersistBytes how many bytes in Raft's persisted log?
@@ -159,6 +165,7 @@ func (rf *Raft) termCheck(term int) {
 	if term > rf.currentTerm {
 		rf.currentTerm = term
 		rf.votedFor = -1
+		rf.persist()
 		rf.state = &rf.followerState
 		rf.electionTimer.resetTimer(rf)
 		rf.dprint("term check - switch to follower")
@@ -181,9 +188,10 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	reply.Term = rf.currentTerm
 	if rf.votedFor == -1 {
 		// Election restriction: at least as up-to-date check
-		if (args.LastLogTerm > rf.log.lastTerm) ||
-			(args.LastLogTerm == rf.log.lastTerm && args.LastLogIndex >= rf.log.lastIndex) {
+		if (args.LastLogTerm > rf.log.LastTerm) ||
+			(args.LastLogTerm == rf.log.LastTerm && args.LastLogIndex >= rf.log.LastIndex) {
 			rf.votedFor = args.CandidateId
+			rf.persist()
 			rf.dprint(fmt.Sprintf("vote granted to %d", rf.votedFor))
 		}
 	}
@@ -223,16 +231,17 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	}
 
 	reply.Term = rf.currentTerm
-	if rf.log.lastIndex < args.PrevLogIndex {
-		reply.XLen = rf.log.lastIndex + 1
+	if rf.log.LastIndex < args.PrevLogIndex {
+		reply.XLen = rf.log.LastIndex + 1
 		reply.Success = false
-	} else if rf.log.entries[args.PrevLogIndex].Term != args.PrevLogTerm {
-		reply.XLen = rf.log.lastIndex + 1
-		//reply.XTerm = rf.log.entries[args.PrevLogIndex].Term
-		//reply.XIndex = rf.log.lastIndex + 1
+	} else if rf.log.Entries[args.PrevLogIndex].Term != args.PrevLogTerm {
+		reply.XLen = rf.log.LastIndex + 1
 		reply.Success = false
 	} else {
-		lastNewIndex := rf.log.followerAppend(args.Entries, args.PrevLogIndex)
+		change, lastNewIndex := rf.log.followerAppend(args.Entries, args.PrevLogIndex, rf)
+		if change {
+			rf.persist()
+		}
 		// can't update commitIndex if it haven't kept up with new leader
 		if args.LeaderCommit > rf.commitIndex {
 			newCommitIndex := min(lastNewIndex, args.LeaderCommit)
@@ -300,11 +309,15 @@ func (rf *Raft) heartbeatOnce(server int) {
 		return
 	}
 	nextId := rf.nextIndex[server]
+	rollback := rf.rollback[server]
+	if rollback == 0 && rf.log.LastIndex >= nextId {
+		rollback = min(2*maxEntrySend, rf.log.LastIndex+1-nextId)
+	}
 	args := AppendEntriesArgs{
 		Term: rf.currentTerm, LeaderId: rf.me,
 		PrevLogIndex: nextId - 1,
-		PrevLogTerm:  rf.log.entries[nextId-1].Term,
-		Entries:      rf.log.entries[nextId : nextId+rf.rollback[server]],
+		PrevLogTerm:  rf.log.Entries[nextId-1].Term,
+		Entries:      rf.log.Entries[nextId : nextId+rollback],
 		LeaderCommit: rf.commitIndex}
 	rf.mutex.Unlock()
 
@@ -321,16 +334,23 @@ func (rf *Raft) heartbeatOnce(server int) {
 	}
 
 	if reply.Success {
-		rf.nextIndex[server] = nextId + rf.rollback[server]
+		rf.nextIndex[server] = nextId + rollback
+		rf.rollback[server] = 0
 		// more than one
-		rf.rollback[server] = min(maxEntrySend, rf.log.lastIndex+1-rf.nextIndex[server])
+		//rf.rollback[server] = min(maxEntrySend, rf.log.LastIndex+1-rf.nextIndex[server])
 		//println("next rollback ", rf.rollback[server])
-		//rf.rollback[server] = min(1, rf.log.lastIndex+1-rf.nextIndex[server])
+		//rf.rollback[server] = min(1, rf.log.LastIndex+1-rf.nextIndex[server])
 		rf.matchIndex[server] = rf.nextIndex[server] - 1
 		rf.updateCommitIndex(rf.matchIndex[server])
-
+		//if rf.log.LastIndex >= rf.nextIndex[server] {
+		//	select {
+		//	case rf.heartbeatCh[server] <- true:
+		//	default:
+		//	}
+		//}
 	} else {
-		rollback := max(min(maxEntrySend, rf.rollback[server]*2), 2)
+		rollback = max(min(maxEntrySend, rf.rollback[server]*2), 2)
+		rollback = min(rollback, rf.nextIndex[server]-1)
 		//rollback := 1
 		rf.rollback[server] = rollback
 		rf.nextIndex[server] = min(rf.nextIndex[server]-rollback, reply.XLen)
@@ -383,7 +403,8 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		return 0, 0, false
 	}
 	term := rf.currentTerm
-	index := rf.log.leaderAppend(LogEntry{Term: term, Command: command})
+	index := rf.log.leaderAppend(LogEntry{Term: term, Command: command}, rf)
+	rf.persist()
 	return index, term, true
 }
 
@@ -437,10 +458,10 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.votedFor = -1
 
 	// initialize log
-	rf.log.entries = make([]LogEntry, 0)
-	rf.log.entries = append(rf.log.entries, LogEntry{Term: 0})
-	rf.log.lastIndex = 0
-	rf.log.lastTerm = 0
+	rf.log.Entries = make([]LogEntry, 0)
+	rf.log.Entries = append(rf.log.Entries, LogEntry{Term: 0})
+	rf.log.LastIndex = 0
+	rf.log.LastTerm = 0
 
 	rf.state = &rf.followerState
 	rf.electionTimer = makeElectionTimer()
@@ -485,7 +506,7 @@ func (rf *Raft) commitThread() {
 			applyIndex := rf.lastApplied + 1
 			rf.applyCh <- raftapi.ApplyMsg{
 				CommandValid: true,
-				Command:      rf.log.entries[applyIndex].Command,
+				Command:      rf.log.Entries[applyIndex].Command,
 				CommandIndex: applyIndex,
 			}
 			rf.lastApplied++

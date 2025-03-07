@@ -10,10 +10,13 @@ import (
 
 // Tools
 
-func expandSlice(slice []LogEntry, n int) []LogEntry {
+func expandSlice(slice []LogEntry, n int) (bool, []LogEntry) {
+	if n == len(slice) {
+		return false, slice
+	}
 	if n <= cap(slice) {
 		// 如果不需要扩容，仅调整长度，不影响原数据
-		return slice[:n]
+		return true, slice[:n]
 	}
 
 	// 当 n > cap(slice) 时，计算新容量
@@ -25,7 +28,7 @@ func expandSlice(slice []LogEntry, n int) []LogEntry {
 	// 仅拷贝原始数据（新元素为零值）
 	copy(newSlice, slice)
 
-	return newSlice
+	return true, newSlice
 }
 
 // Debugging
@@ -43,6 +46,10 @@ func (rf *Raft) dprint(msg string) {
 
 func (rf *Raft) dprintf(format string, a ...interface{}) {
 	//fmt.Printf("(%v) [%d, %s] - %s\n", time.Now(), rf.me, rf.stateName(), fmt.Sprintf(format, a...))
+}
+
+func (rf *Raft) dprintf3C(format string, a ...interface{}) {
+	fmt.Printf("(%v) [%d, %s] - %s\n", time.Now(), rf.me, rf.stateName(), fmt.Sprintf(format, a...))
 }
 
 func (rf *Raft) dassert(cond bool, msg string, args ...interface{}) {
