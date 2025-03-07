@@ -42,10 +42,11 @@ type Raft struct {
 	rollback    []int
 	nextIndex   []int
 	matchIndex  []int
+	rpcId       []int // rpcId is introduced to ignore redundant RPCs
 
-	heartbeatCh []chan bool
-	commitMu    sync.Mutex
-	commitCond  *sync.Cond
+	//heartbeatCh []chan bool
+	commitMu   sync.Mutex
+	commitCond *sync.Cond
 
 	leaderState    LeaderState
 	followerState  FollowerState
@@ -167,15 +168,13 @@ func (rf *Raft) termCheck(term int) {
 		rf.votedFor = -1
 		rf.persist()
 		rf.state = &rf.followerState
-		rf.electionTimer.resetTimer(rf)
+		rf.electionTimer.resetTimer()
 		rf.dprint("term check - switch to follower")
 	}
 }
 
 // RequestVote RPC handler
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
-	// Your code here (3A, 3B).
-
 	// currentTerm can only increase, so no lock here
 	if args.Term < rf.currentTerm {
 		reply.Term = rf.currentTerm
@@ -225,12 +224,10 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	if rf.state.getState() == ST_Candidate && args.Term == rf.currentTerm {
 		rf.state = &rf.followerState
-		//rf.dprint("append same term - switch to follower")
 	} else {
 		rf.termCheck(args.Term)
 	}
-	rf.dprintf3C("receive heartbeat from %d", args.LeaderId)
-	rf.electionTimer.resetTimer(rf)
+	rf.electionTimer.resetTimer()
 
 	reply.Term = rf.currentTerm
 	if rf.log.LastIndex < args.PrevLogIndex {
@@ -326,38 +323,31 @@ func (rf *Raft) heartbeatOnce(server int) {
 		PrevLogTerm:  rf.log.Entries[nextId-1].Term,
 		Entries:      rf.log.Entries[nextId : nextId+rollback],
 		LeaderCommit: rf.commitIndex}
+	RPCId := rf.rpcId[server] + 1
 	rf.mutex.Unlock()
 
 	reply := AppendEntriesReply{}
-	rf.dprintf3C("sent heartbeat to %d", server)
-	defer rf.dprintf3C("finished heartbeat to %d", server)
 	ok := rf.sendAppendEntries(server, &args, &reply)
 	if !ok {
 		return
 	}
 	rf.mutex.Lock()
+	defer rf.mutex.Unlock()
 	rf.termCheck(reply.Term)
 	if rf.state.getState() != ST_Leader {
-		rf.mutex.Unlock()
 		return
 	}
-
+	if RPCId <= rf.rpcId[server] {
+		return
+	} else {
+		rf.rpcId[server] = RPCId
+	}
 	if reply.Success {
 		rf.nextIndex[server] = nextId + rollback
 		rf.rollback[server] = 0
-		// more than one
-		//rf.rollback[server] = min(maxEntrySend, rf.log.LastIndex+1-rf.nextIndex[server])
-		//println("next rollback ", rf.rollback[server])
-		//rf.rollback[server] = min(1, rf.log.LastIndex+1-rf.nextIndex[server])
 		rf.matchIndex[server] = rf.nextIndex[server] - 1
 		rf.dprintf3C("new matchIndex %d from %d, my commitIndex %d", rf.matchIndex[server], server, rf.commitIndex)
 		rf.updateCommitIndex(rf.matchIndex[server])
-		//if rf.log.LastIndex >= rf.nextIndex[server] {
-		//	select {
-		//	case rf.heartbeatCh[server] <- true:
-		//	default:
-		//	}
-		//}
 	} else {
 		rollback = max(min(maxEntrySend, rf.rollback[server]*2), 2)
 		rollback = min(rollback, rf.nextIndex[server]-1)
@@ -378,32 +368,6 @@ func (rf *Raft) heartbeatOnce(server int) {
 			}
 		}
 		rf.nextIndex[server] = min(rf.nextIndex[server]-rollback, newNextIndex)
-		//select {
-		//case rf.heartbeatCh[server] <- true:
-		//default:
-		//}
-	}
-	//else {
-	//	rollback = max(min(maxEntrySend, rf.rollback[server]*2), 2)
-	//	rollback = min(rollback, rf.nextIndex[server]-1)
-	//	//rollback := 1
-	//	rf.rollback[server] = rollback
-	//	rf.nextIndex[server] = min(rf.nextIndex[server]-rollback, reply.XLen)
-	//	select {
-	//	case rf.heartbeatCh[server] <- true:
-	//	default:
-	//	}
-	//}
-	rf.mutex.Unlock()
-}
-
-func (rf *Raft) heartbeatThread(server int) {
-	for rf.killed() == false {
-		select {
-		case <-rf.heartbeatCh[server]:
-			rf.dprintf3C("call sent heartbeat to %d", server)
-			rf.heartbeatOnce(server)
-		}
 	}
 }
 
@@ -413,13 +377,6 @@ func (rf *Raft) sendHeartbeat() {
 			continue
 		}
 		go rf.heartbeatOnce(server)
-		//select {
-		//case rf.heartbeatCh[server] <- true:
-		//	//rf.dprintf3C("fill heartbeat channel to %d, success", server)
-		//default:
-		//	//rf.dprintf3C("fill heartbeat channel to %d, fail", server)
-		//}
-		//rf.dprintf3C("fill heartbeat channel to %d", server)
 	}
 }
 
@@ -511,15 +468,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.rollback = make([]int, len(rf.peers))
 	rf.nextIndex = make([]int, len(rf.peers))
 	rf.matchIndex = make([]int, len(rf.peers))
-
-	rf.heartbeatCh = make([]chan bool, len(rf.peers))
-	for i := 0; i < len(peers); i++ {
-		if i == rf.me {
-			continue
-		}
-		rf.heartbeatCh[i] = make(chan bool, 2)
-		//go rf.heartbeatThread(i)
-	}
+	rf.rpcId = make([]int, len(rf.peers))
 
 	rf.commitCond = sync.NewCond(&rf.commitMu)
 

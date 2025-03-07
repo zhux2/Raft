@@ -8,7 +8,7 @@ func (follower *FollowerState) getState() ServerState {
 
 func (follower *FollowerState) tickerFunc(rf *Raft) {
 	for rf.killed() == false {
-		if rf.electionTimer.waitFor(rf) {
+		if rf.electionTimer.waitFor() {
 			rf.mutex.Lock()
 			rf.state = &rf.candidateState
 			rf.dprint("switch to candidate")

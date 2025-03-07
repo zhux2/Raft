@@ -20,7 +20,7 @@ func expandSlice(slice []LogEntry, n int) (bool, []LogEntry) {
 	}
 
 	// 当 n > cap(slice) 时，计算新容量
-	newCap := cap(slice) + ((n-cap(slice)+31)/32)*32
+	newCap := ((n + 31) / 32) * 32
 
 	// 分配新切片，长度为 n，容量为 newCap
 	newSlice := make([]LogEntry, n, newCap)
@@ -79,22 +79,13 @@ type ElectionTimer struct {
 
 func makeElectionTimer() *ElectionTimer {
 	electionTimer := new(ElectionTimer)
-	//electionTimer.resetChan = make(chan bool)
 	duration := electionTimeout()
 	electionTimer.endTime = time.Now().Add(duration)
 	electionTimer.timer = time.NewTimer(duration)
 	return electionTimer
 }
 
-func (et *ElectionTimer) resetTimer(rf *Raft) {
-	//rf.dprint("reset timer")
-	//select {
-	//case et.resetChan <- true:
-	//	rf.dprint("really reset timer")
-	//default:
-	//	rf.dprint("full reset timer")
-	//}
-
+func (et *ElectionTimer) resetTimer() {
 	et.mutex.Lock()
 	if !et.timer.Stop() {
 		select {
@@ -103,43 +94,33 @@ func (et *ElectionTimer) resetTimer(rf *Raft) {
 		}
 	}
 	duration := electionTimeout()
-	//rf.dprint(fmt.Sprintf("ElectionTimer reset %d", duration.Milliseconds()))
 	et.endTime = time.Now().Add(duration)
 	et.timer.Reset(duration)
 	et.mutex.Unlock()
 }
 
-func (et *ElectionTimer) waitFor(rf *Raft) bool {
+func (et *ElectionTimer) waitFor() bool {
 	for {
 		et.mutex.Lock()
 		select {
 		case <-et.timer.C:
-			//rf.dprint("timer expired")
 			et.mutex.Unlock()
 			return true
 		default:
 			waitTime := et.endTime.Sub(time.Now())
 			et.mutex.Unlock()
 			time.Sleep(waitTime)
-			//case <-et.resetChan:
-			//	rf.dprint("timer reset")
-			//	et.electionTimerReset(rf)
-			//	return false
 		}
 	}
 }
 
-func (et *ElectionTimer) candidateTimeout(rf *Raft) bool {
+func (et *ElectionTimer) candidateTimeout() bool {
 	et.mutex.Lock()
 	defer et.mutex.Unlock()
 	select {
 	case <-et.timer.C:
 		//rf.dprint("timer expired")
 		return true
-	//case <-et.resetChan:
-	//	rf.dprint("timer reset")
-	//	et.electionTimerReset(rf)
-	//	return false
 	default:
 		//rf.dprint("no action")
 		return false

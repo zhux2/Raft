@@ -27,6 +27,7 @@ func (leader *LeaderState) switchTo(rf *Raft) {
 		rf.matchIndex[i] = 0
 		rf.nextIndex[i] = rf.log.LastIndex + 1
 		rf.rollback[i] = 0
+		rf.rpcId[i] = 0
 	}
 }
 

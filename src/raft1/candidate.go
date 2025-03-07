@@ -29,12 +29,10 @@ func (candidate *CandidateState) voteThread(rf *Raft, server int, args *RequestV
 				// "rf.state.getState() == ST_Candidate" this condition may be redundant
 				if rf.state.getState() != ST_Candidate {
 					rf.mutex.Unlock()
-					//rf.dprintf("lose [%d] vote: ", server)
 					return
 				}
 				if args.Term == rf.currentTerm && reply.VoteGranted {
 					candidate.voteGain += 1
-					rf.dprintf("win [%d] vote: ", server)
 				}
 				rf.mutex.Unlock()
 				return
@@ -46,7 +44,7 @@ func (candidate *CandidateState) voteThread(rf *Raft, server int, args *RequestV
 
 // one tick is a round of vote
 func (candidate *CandidateState) tickerFunc(rf *Raft) {
-	rf.dprintf3C("Start Election")
+	rf.dprintf("Start Election")
 
 	rf.mutex.Lock()
 	if rf.state.getState() != ST_Candidate {
@@ -72,18 +70,18 @@ func (candidate *CandidateState) tickerFunc(rf *Raft) {
 		go candidate.voteThread(rf, server, &args, ctx, &wg)
 	}
 
-	rf.electionTimer.resetTimer(rf)
+	rf.electionTimer.resetTimer()
 
 	for rf.killed() == false {
 		rf.mutex.Lock()
-		if rf.state.getState() == ST_Follower || rf.electionTimer.candidateTimeout(rf) {
-			rf.dprintf3C("Lose Election")
+		if rf.state.getState() == ST_Follower || rf.electionTimer.candidateTimeout() {
+			rf.dprintf("Lose Election")
 			rf.mutex.Unlock()
 			break
 		}
 		if candidate.voteGain > rf.majority {
 			rf.leaderState.switchTo(rf)
-			rf.dprintf3C("Win Election")
+			rf.dprintf("Win Election")
 			rf.sendHeartbeat()
 			rf.mutex.Unlock()
 			break
