@@ -42,6 +42,7 @@ func (rf *Raft) updateCommitIndex(r int) {
 	if newCommitIndex > rf.commitIndex && rf.log.Entries[newCommitIndex].Term == rf.currentTerm {
 		rf.commitMu.Lock()
 		rf.commitIndex = newCommitIndex
+		rf.dprintf3C("update commitIndex %d", rf.commitIndex)
 		rf.commitCond.Signal()
 		rf.commitMu.Unlock()
 	}

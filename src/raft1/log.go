@@ -28,6 +28,7 @@ func (log *Log) followerAppend(ens []LogEntry, prevLogIndex int, rf *Raft) (bool
 	flag := false
 	for j := 0; j < len(ens); j += 1 {
 		if flag {
+			rf.dprintf3C("append log entry %v", ens[j])
 			log.Entries[i+j] = ens[j]
 		} else {
 			if log.Entries[i+j].Term != ens[j].Term {
@@ -40,5 +41,6 @@ func (log *Log) followerAppend(ens []LogEntry, prevLogIndex int, rf *Raft) (bool
 	//println("append length ", len(ens))
 	log.LastIndex = prevLogIndex + len(ens)
 	log.LastTerm = log.Entries[log.LastIndex].Term
+	rf.dassert(len(log.Entries) == log.LastIndex+1, "logLength:%d lastIndex:%d", len(log.Entries), log.LastIndex)
 	return change || flag, log.LastIndex
 }

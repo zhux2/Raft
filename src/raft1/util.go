@@ -49,7 +49,7 @@ func (rf *Raft) dprintf(format string, a ...interface{}) {
 }
 
 func (rf *Raft) dprintf3C(format string, a ...interface{}) {
-	fmt.Printf("(%v) [%d, %s] - %s\n", time.Now(), rf.me, rf.stateName(), fmt.Sprintf(format, a...))
+	//fmt.Printf("(%v) [%d, %s, %d] - %s\n", time.Now(), rf.me, rf.stateName(), rf.currentTerm, fmt.Sprintf(format, a...))
 }
 
 func (rf *Raft) dassert(cond bool, msg string, args ...interface{}) {
@@ -62,7 +62,7 @@ func (rf *Raft) dassert(cond bool, msg string, args ...interface{}) {
 }
 
 const electionTimeoutL = 350
-const electionTimeoutR = 450
+const electionTimeoutR = 550
 
 func electionTimeout() time.Duration {
 	randMillisecond := electionTimeoutL + rand.Intn(electionTimeoutR-electionTimeoutL)

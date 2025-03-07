@@ -210,9 +210,9 @@ type AppendEntriesArgs struct {
 type AppendEntriesReply struct {
 	Term    int
 	Success bool
-	//XTerm   int
-	//XIndex  int
-	XLen int
+	XTerm   int
+	XIndex  int
+	XLen    int
 }
 
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
@@ -229,12 +229,21 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	} else {
 		rf.termCheck(args.Term)
 	}
+	rf.dprintf3C("receive heartbeat from %d", args.LeaderId)
+	rf.electionTimer.resetTimer(rf)
 
 	reply.Term = rf.currentTerm
 	if rf.log.LastIndex < args.PrevLogIndex {
+		reply.XTerm = -1
 		reply.XLen = rf.log.LastIndex + 1
 		reply.Success = false
 	} else if rf.log.Entries[args.PrevLogIndex].Term != args.PrevLogTerm {
+		reply.XTerm = rf.log.Entries[args.PrevLogIndex].Term
+		i := args.PrevLogIndex
+		for rf.log.Entries[i].Term == reply.XTerm {
+			i -= 1
+		}
+		reply.XIndex = i + 1
 		reply.XLen = rf.log.LastIndex + 1
 		reply.Success = false
 	} else {
@@ -256,8 +265,6 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		reply.Success = true
 	}
 	rf.mutex.Unlock()
-
-	rf.electionTimer.resetTimer(rf)
 }
 
 // example code to send a RequestVote RPC to a server.
@@ -297,7 +304,7 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 	return ok
 }
 
-const maxEntrySend = 8
+const maxEntrySend = 64
 
 func (rf *Raft) heartbeatOnce(server int) {
 	// Use lock here to prevent this server switch to not-leader state.
@@ -322,6 +329,8 @@ func (rf *Raft) heartbeatOnce(server int) {
 	rf.mutex.Unlock()
 
 	reply := AppendEntriesReply{}
+	rf.dprintf3C("sent heartbeat to %d", server)
+	defer rf.dprintf3C("finished heartbeat to %d", server)
 	ok := rf.sendAppendEntries(server, &args, &reply)
 	if !ok {
 		return
@@ -341,6 +350,7 @@ func (rf *Raft) heartbeatOnce(server int) {
 		//println("next rollback ", rf.rollback[server])
 		//rf.rollback[server] = min(1, rf.log.LastIndex+1-rf.nextIndex[server])
 		rf.matchIndex[server] = rf.nextIndex[server] - 1
+		rf.dprintf3C("new matchIndex %d from %d, my commitIndex %d", rf.matchIndex[server], server, rf.commitIndex)
 		rf.updateCommitIndex(rf.matchIndex[server])
 		//if rf.log.LastIndex >= rf.nextIndex[server] {
 		//	select {
@@ -351,14 +361,39 @@ func (rf *Raft) heartbeatOnce(server int) {
 	} else {
 		rollback = max(min(maxEntrySend, rf.rollback[server]*2), 2)
 		rollback = min(rollback, rf.nextIndex[server]-1)
-		//rollback := 1
 		rf.rollback[server] = rollback
-		rf.nextIndex[server] = min(rf.nextIndex[server]-rollback, reply.XLen)
-		select {
-		case rf.heartbeatCh[server] <- true:
-		default:
+		newNextIndex := 1
+		if reply.XTerm < 0 {
+			newNextIndex = reply.XLen
+		} else {
+			//rf.dassert(reply.XTerm < args.PrevLogTerm, "XTerm larger than PrevLogTerm")
+			i := args.PrevLogIndex - 1
+			for rf.log.Entries[i].Term > reply.XTerm {
+				i -= 1
+			}
+			if rf.log.Entries[i].Term == reply.XTerm {
+				newNextIndex = i + 1
+			} else {
+				newNextIndex = reply.XIndex
+			}
 		}
+		rf.nextIndex[server] = min(rf.nextIndex[server]-rollback, newNextIndex)
+		//select {
+		//case rf.heartbeatCh[server] <- true:
+		//default:
+		//}
 	}
+	//else {
+	//	rollback = max(min(maxEntrySend, rf.rollback[server]*2), 2)
+	//	rollback = min(rollback, rf.nextIndex[server]-1)
+	//	//rollback := 1
+	//	rf.rollback[server] = rollback
+	//	rf.nextIndex[server] = min(rf.nextIndex[server]-rollback, reply.XLen)
+	//	select {
+	//	case rf.heartbeatCh[server] <- true:
+	//	default:
+	//	}
+	//}
 	rf.mutex.Unlock()
 }
 
@@ -366,6 +401,7 @@ func (rf *Raft) heartbeatThread(server int) {
 	for rf.killed() == false {
 		select {
 		case <-rf.heartbeatCh[server]:
+			rf.dprintf3C("call sent heartbeat to %d", server)
 			rf.heartbeatOnce(server)
 		}
 	}
@@ -376,10 +412,14 @@ func (rf *Raft) sendHeartbeat() {
 		if server == rf.me {
 			continue
 		}
-		select {
-		case rf.heartbeatCh[server] <- true:
-		default:
-		}
+		go rf.heartbeatOnce(server)
+		//select {
+		//case rf.heartbeatCh[server] <- true:
+		//	//rf.dprintf3C("fill heartbeat channel to %d, success", server)
+		//default:
+		//	//rf.dprintf3C("fill heartbeat channel to %d, fail", server)
+		//}
+		//rf.dprintf3C("fill heartbeat channel to %d", server)
 	}
 }
 
@@ -478,7 +518,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 			continue
 		}
 		rf.heartbeatCh[i] = make(chan bool, 2)
-		go rf.heartbeatThread(i)
+		//go rf.heartbeatThread(i)
 	}
 
 	rf.commitCond = sync.NewCond(&rf.commitMu)

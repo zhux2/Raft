@@ -46,7 +46,7 @@ func (candidate *CandidateState) voteThread(rf *Raft, server int, args *RequestV
 
 // one tick is a round of vote
 func (candidate *CandidateState) tickerFunc(rf *Raft) {
-	rf.dprint("Start Election")
+	rf.dprintf3C("Start Election")
 
 	rf.mutex.Lock()
 	if rf.state.getState() != ST_Candidate {
@@ -77,19 +77,19 @@ func (candidate *CandidateState) tickerFunc(rf *Raft) {
 	for rf.killed() == false {
 		rf.mutex.Lock()
 		if rf.state.getState() == ST_Follower || rf.electionTimer.candidateTimeout(rf) {
-			rf.dprint("Lose Election")
+			rf.dprintf3C("Lose Election")
 			rf.mutex.Unlock()
 			break
 		}
 		if candidate.voteGain > rf.majority {
 			rf.leaderState.switchTo(rf)
-			rf.dprint("Win Election")
+			rf.dprintf3C("Win Election")
 			rf.sendHeartbeat()
 			rf.mutex.Unlock()
 			break
 		}
 		rf.mutex.Unlock()
-		time.Sleep(10 * time.Millisecond)
+		//time.Sleep(10 * time.Millisecond)
 	}
 
 	// clear all vote-thread
