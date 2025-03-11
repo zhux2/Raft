@@ -162,15 +162,17 @@ type RequestVoteReply struct {
 }
 
 // should lock before call it
-func (rf *Raft) termCheck(term int) {
+func (rf *Raft) termCheck(term int) bool {
 	if term > rf.currentTerm {
 		rf.currentTerm = term
 		rf.votedFor = -1
-		rf.persist()
+		//rf.persist()
 		rf.state = &rf.followerState
 		rf.electionTimer.resetTimer()
 		rf.dprint("term check - switch to follower")
+		return true
 	}
+	return false
 }
 
 // RequestVote RPC handler
@@ -183,18 +185,21 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	}
 	rf.mutex.Lock()
 	defer rf.mutex.Unlock()
-	rf.termCheck(args.Term)
+	change := rf.termCheck(args.Term)
 	reply.Term = rf.currentTerm
 	if rf.votedFor == -1 {
 		// Election restriction: at least as up-to-date check
 		if (args.LastLogTerm > rf.log.LastTerm) ||
 			(args.LastLogTerm == rf.log.LastTerm && args.LastLogIndex >= rf.log.LastIndex) {
 			rf.votedFor = args.CandidateId
-			rf.persist()
+			change = true
 			rf.dprint(fmt.Sprintf("vote granted to %d", rf.votedFor))
 		}
 	}
 	reply.VoteGranted = rf.votedFor == args.CandidateId
+	if change {
+		rf.persist()
+	}
 }
 
 type AppendEntriesArgs struct {
@@ -220,12 +225,13 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		reply.Success = false
 		return
 	}
+	change := false
 	rf.mutex.Lock()
 
 	if rf.state.getState() == ST_Candidate && args.Term == rf.currentTerm {
 		rf.state = &rf.followerState
 	} else {
-		rf.termCheck(args.Term)
+		change = rf.termCheck(args.Term)
 	}
 	rf.electionTimer.resetTimer()
 
@@ -244,10 +250,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		reply.XLen = rf.log.LastIndex + 1
 		reply.Success = false
 	} else {
-		change, lastNewIndex := rf.log.followerAppend(args.Entries, args.PrevLogIndex, rf)
-		if change {
-			rf.persist()
-		}
+		chgFlag, lastNewIndex := rf.log.followerAppend(args.Entries, args.PrevLogIndex, rf)
+		change = change || chgFlag
 		// can't update commitIndex if it haven't kept up with new leader
 		if args.LeaderCommit > rf.commitIndex {
 			newCommitIndex := min(lastNewIndex, args.LeaderCommit)
@@ -260,6 +264,9 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			}
 		}
 		reply.Success = true
+	}
+	if change {
+		rf.persist()
 	}
 	rf.mutex.Unlock()
 }
@@ -333,7 +340,9 @@ func (rf *Raft) heartbeatOnce(server int) {
 	}
 	rf.mutex.Lock()
 	defer rf.mutex.Unlock()
-	rf.termCheck(reply.Term)
+	if rf.termCheck(reply.Term) {
+		rf.persist()
+	}
 	if rf.state.getState() != ST_Leader {
 		return
 	}

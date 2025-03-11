@@ -10,25 +10,18 @@ import (
 
 // Tools
 
-func expandSlice(slice []LogEntry, n int) (bool, []LogEntry) {
-	if n == len(slice) {
-		return false, slice
-	}
+func expandSlice(slice []LogEntry, n int) []LogEntry {
 	if n <= cap(slice) {
-		// 如果不需要扩容，仅调整长度，不影响原数据
-		return true, slice[:n]
+		return slice[:n]
 	}
 
-	// 当 n > cap(slice) 时，计算新容量
 	newCap := ((n + 31) / 32) * 32
 
-	// 分配新切片，长度为 n，容量为 newCap
 	newSlice := make([]LogEntry, n, newCap)
 
-	// 仅拷贝原始数据（新元素为零值）
 	copy(newSlice, slice)
 
-	return true, newSlice
+	return newSlice[:n]
 }
 
 // Debugging

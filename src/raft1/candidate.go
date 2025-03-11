@@ -56,8 +56,8 @@ func (candidate *CandidateState) tickerFunc(rf *Raft) {
 	candidate.voteGain = 1
 	args := RequestVoteArgs{
 		Term: rf.currentTerm, CandidateId: rf.me, LastLogIndex: rf.log.LastIndex, LastLogTerm: rf.log.LastTerm}
-	rf.mutex.Unlock()
 	rf.persist()
+	rf.mutex.Unlock()
 
 	var wg sync.WaitGroup
 	ctx, cancel := context.WithCancel(context.Background())

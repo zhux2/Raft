@@ -22,8 +22,9 @@ func (log *Log) leaderAppend(entry LogEntry, rf *Raft) int {
 }
 
 func (log *Log) followerAppend(ens []LogEntry, prevLogIndex int, rf *Raft) (bool, int) {
-	change := false
-	change, log.Entries = expandSlice(log.Entries, prevLogIndex+len(ens)+1)
+	if prevLogIndex+len(ens) > log.LastIndex {
+		log.Entries = expandSlice(log.Entries, prevLogIndex+len(ens)+1)
+	}
 	i := prevLogIndex + 1
 	flag := false
 	for j := 0; j < len(ens); j += 1 {
@@ -38,9 +39,19 @@ func (log *Log) followerAppend(ens []LogEntry, prevLogIndex int, rf *Raft) (bool
 			}
 		}
 	}
-	//println("append length ", len(ens))
-	log.LastIndex = prevLogIndex + len(ens)
-	log.LastTerm = log.Entries[log.LastIndex].Term
-	rf.dassert(len(log.Entries) == log.LastIndex+1, "logLength:%d lastIndex:%d", len(log.Entries), log.LastIndex)
-	return change || flag, log.LastIndex
+	if flag {
+		log.LastIndex = prevLogIndex + len(ens)
+		log.LastTerm = log.Entries[log.LastIndex].Term
+		log.cutoff(log.LastIndex + 1)
+	}
+	return flag, prevLogIndex + len(ens)
+}
+
+func (log *Log) cutoff(newLen int) {
+	if newLen < len(log.Entries) {
+		for i := newLen; i < len(log.Entries); i++ {
+			log.Entries[i].Term = 0
+		}
+		log.Entries = log.Entries[:newLen]
+	}
 }
