@@ -87,7 +87,7 @@ func (candidate *CandidateState) tickerFunc(rf *Raft) {
 			break
 		}
 		rf.mutex.Unlock()
-		//time.Sleep(10 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
 	}
 
 	// clear all vote-thread

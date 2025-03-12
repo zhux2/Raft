@@ -14,8 +14,7 @@ func (leader *LeaderState) getState() ServerState {
 
 func (leader *LeaderState) tickerFunc(rf *Raft) {
 	rf.sendHeartbeat()
-	// pause for a random amount of time between 50 and 100
-	// milliseconds.
+
 	ms := 50 + (rand.Int63() % 100)
 	time.Sleep(time.Duration(ms) * time.Millisecond)
 }
@@ -40,10 +39,9 @@ func (rf *Raft) updateCommitIndex(r int) {
 	copySlice := append([]int(nil), rf.matchIndex...)
 	sort.Ints(copySlice)
 	newCommitIndex := max(rf.commitIndex, copySlice[rf.majority])
-	if newCommitIndex > rf.commitIndex && rf.log.Entries[newCommitIndex].Term == rf.currentTerm {
+	if newCommitIndex > rf.commitIndex && rf.log.getEntry(newCommitIndex).Term == rf.currentTerm {
 		rf.commitMu.Lock()
 		rf.commitIndex = newCommitIndex
-		rf.dprintf3C("update commitIndex %d", rf.commitIndex)
 		rf.commitCond.Signal()
 		rf.commitMu.Unlock()
 	}
